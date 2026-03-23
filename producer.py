@@ -1,30 +1,14 @@
 import os
-import logging
-from logging.handlers import RotatingFileHandler
 from confluent_kafka import Consumer, Producer
 from dotenv import load_dotenv
+from utils import setup_logger
 
 load_dotenv()
 
-LOG_FILE = "producer.log"
 BATCH_SIZE = 100
 
-# Logging setup: console + rotating file (max 5MB, keep 3 backups)
-formatter = logging.Formatter(
-    fmt="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+log = setup_logger("producer.log")
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3)
-file_handler.setFormatter(formatter)
-
-logging.basicConfig(level=logging.INFO, handlers=[console_handler, file_handler])
-log = logging.getLogger(__name__)
-
-# Kafka config
 source_conf = {
     "bootstrap.servers": os.getenv("SOURCE_BOOTSTRAP_SERVERS"),
     "security.protocol": os.getenv("SOURCE_SECURITY_PROTOCOL"),
@@ -44,17 +28,22 @@ local_conf = {
 source_topic = os.getenv("SOURCE_TOPIC")
 local_topic = os.getenv("LOCAL_TOPIC")
 
-consumer = Consumer(source_conf)
-producer = Producer(local_conf)
-consumer.subscribe([source_topic])
-
-log.info("Bridge started: Remote Kafka -> Local Kafka")
 
 def delivery_report(err, msg):
     if err is not None:
         log.error(f"Delivery failed: {err}")
 
+
+consumer = None
+producer = None
+
 try:
+    consumer = Consumer(source_conf)
+    producer = Producer(local_conf)
+    consumer.subscribe([source_topic])
+
+    log.info("Bridge started: Remote Kafka -> Local Kafka")
+
     count = 0
     while True:
         msg = consumer.poll(1.0)
@@ -83,6 +72,8 @@ except KeyboardInterrupt:
     log.info("Stopping bridge...")
 
 finally:
-    consumer.close()
-    producer.flush(timeout=30)
+    if consumer:
+        consumer.close()
+    if producer:
+        producer.flush(timeout=30)
     log.info("Bridge stopped cleanly.")
